@@ -14,13 +14,7 @@ def api_get():
     try:
         return r.json()
     except ValueError:
-        raise RuntimeError(
-            "Apps Script did not return JSON. "
-            f"Final URL={r.url}\nResponse={r.text[:1000]}\n"
-            "Deploy Apps Script as Web app: Execute as Me, Who has access Anyone, "
-            "and use the /exec URL (not /dev). Also ensure the GitHub key matches "
-            "GITHUB_ORDER_SECRET in Apps Script."
-        )
+        raise RuntimeError(f"Apps Script did not return JSON. Final URL={r.url}\nResponse={r.text[:1000]}")
 
 
 def get_orders():
@@ -30,34 +24,49 @@ def get_orders():
     return data.get("orders", [])
 
 
+def get_value(order, camel, snake=None, default=""):
+    if camel in order:
+        return order.get(camel, default)
+    if snake and snake in order:
+        return order.get(snake, default)
+    return default
+
+
 def send_telegram(order):
+    order_id = get_value(order, "orderId", "order_id")
     text = (
         "🛍️ NEW ORDER RECEIVED\n\n"
-        f"🆔 Order ID: #{order['order_id']}\n"
-        f"📅 Date: {order['date']}\n"
-        f"⏰ Time: {order['time']}\n\n"
-        f"👤 Customer: {order['customer_name']}\n"
-        f"📞 Phone: {order['phone']}\n"
-        f"📍 District: {order['district']}\n"
-        f"📍 Area: {order['area']}\n"
-        f"🏠 Address: {order['full_address']}\n\n"
-        f"📦 Product: {order['product']}\n"
-        f"🔢 Quantity: {order['quantity']}\n"
-        f"💰 Unit Price: ৳{order['unit_price']}\n"
-        f"📦 Product Total: ৳{order['product_total']}\n"
-        f"🚚 Delivery: ৳{order['delivery_charge']}\n"
-        f"💵 GRAND TOTAL: ৳{order['grand_total']}\n\n"
-        f"💳 Payment: {order['payment_method']}\n"
+        f"🆔 Order ID: #{order_id}\n"
+        f"📅 Date: {get_value(order, 'date')}\n"
+        f"⏰ Time: {get_value(order, 'time')}\n\n"
+        f"👤 Customer: {get_value(order, 'customerName', 'customer_name')}\n"
+        f"📞 Phone: {get_value(order, 'phone')}\n"
+        f"📍 District: {get_value(order, 'district')}\n"
+        f"📍 Area: {get_value(order, 'area')}\n"
+        f"🏠 Address: {get_value(order, 'fullAddress', 'full_address')}\n\n"
+        f"📦 Product: {get_value(order, 'product')}\n"
+        f"🔢 Quantity: {get_value(order, 'quantity')}\n"
+        f"💰 Unit Price: ৳{get_value(order, 'unitPrice', 'unit_price')}\n"
+        f"📦 Product Total: ৳{get_value(order, 'productTotal', 'product_total')}\n"
+        f"🚚 Delivery: ৳{get_value(order, 'deliveryCharge', 'delivery_charge')}\n"
+        f"💵 GRAND TOTAL: ৳{get_value(order, 'grandTotal', 'grand_total')}\n\n"
+        f"💳 Payment: {get_value(order, 'paymentMethod', 'payment_method')}\n"
     )
-    if order.get("transaction_id"):
-        text += f"🧾 Transaction ID: {order['transaction_id']}\n"
-    if order.get("order_notes"):
-        text += f"📝 Notes: {order['order_notes']}\n"
-    text += f"📊 Status: {order['order_status'] or 'NEW'}\n\n━━━━━━━━━━━━━━\n⚡ EMUORA ORDERS"
+
+    transaction_id = get_value(order, "transactionId", "transaction_id")
+    notes = get_value(order, "orderNotes", "order_notes")
+    status = get_value(order, "orderStatus", "order_status", "NEW") or "NEW"
+
+    if transaction_id:
+        text += f"🧾 Transaction ID: {transaction_id}\n"
+    if notes:
+        text += f"📝 Notes: {notes}\n"
+    text += f"📊 Status: {status}\n\n━━━━━━━━━━━━━━\n⚡ EMUORA ORDERS"
 
     r = requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=30
+        data={"chat_id": TELEGRAM_CHAT_ID, "text": text},
+        timeout=30,
     )
     r.raise_for_status()
     result = r.json()
@@ -65,10 +74,17 @@ def send_telegram(order):
         raise RuntimeError(f"Telegram error: {result}")
 
 
-def mark_sent(row):
+def mark_sent(order):
+    row = order.get("sheetRow", order.get("row"))
+    order_id = get_value(order, "orderId", "order_id", "?")
+    if not row:
+        raise RuntimeError(f"Order {order_id} has no sheet row")
+
     r = requests.post(
-        API_URL, params={"key": API_KEY},
-        json={"action": "mark_sent", "row": row}, timeout=30
+        API_URL,
+        params={"key": API_KEY},
+        json={"sheetRow": row},
+        timeout=30,
     )
     if r.status_code != 200:
         raise RuntimeError(f"Could not mark row {row}: HTTP {r.status_code}: {r.text[:500]}")
@@ -84,10 +100,13 @@ def main():
     print(f"Checking Google Sheet API: {API_URL}")
     orders = get_orders()
     print(f"Found {len(orders)} unsent order(s).")
+
     for order in orders:
+        order_id = get_value(order, "orderId", "order_id", "?")
+        print(f"Processing order #{order_id}...")
         send_telegram(order)
-        mark_sent(order["row"])
-        print(f"Sent order #{order['order_id']}")
+        mark_sent(order)
+        print(f"Sent order #{order_id} successfully.")
 
 
 if __name__ == "__main__":
