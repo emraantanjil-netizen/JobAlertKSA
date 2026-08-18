@@ -3,8 +3,8 @@ name: Order Notifications
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron uses UTC. This runs approximately every 5 minutes.
-    - cron: "*/5 * * * *"
+    # GitHub cron uses UTC. Run approximately every 30 minutes.
+    - cron: "*/30 * * * *"
 
 # Prevent overlapping runs from sending the same order twice.
 concurrency:
